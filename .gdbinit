@@ -1,4 +1,3 @@
 target remote :1234
-symbol-file kernel
-break _start
+break start
 continue

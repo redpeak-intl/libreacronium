@@ -1,2 +1,4 @@
 /build/
 /kernel
+/kernel-i686
+/kernel-x86_64

@@ -16,15 +16,29 @@
 
 /* Атрибуты дескриптора прерывания:
  * P=1 (присутствует), DPL=00 (уровень привилегий 0), 
- * S=0 (системный сегмент), Type=1110 (32-битный шлюз прерывания) */
+ * S=0 (системный сегмент), Type=1110 (шлюз прерывания) */
 #define INTERRUPT_GATE 0x8e
 
 /* Смещение сегмента кода ядра в GDT */
 #define KERNEL_CODE_SEGMENT_OFFSET 0x08
 
 /**
- * @brief Структура дескриптора прерывания в IDT
+ * @brief Структура дескриптора прерывания в IDT.
+ *
+ * Формат зависит от разрядности: в 32-битном режиме шлюз занимает 8 байт,
+ * в long mode (x86_64) — 16 байт (появляются поля ist и старшие 32 бита адреса).
  */
+#ifdef __x86_64__
+struct IDT_entry {
+    unsigned short int offset_lowerbits;   /**< Младшие 16 бит адреса обработчика */
+    unsigned short int selector;           /**< Селектор сегмента кода в GDT */
+    unsigned char ist;                     /**< Индекс IST (0 = не использовать) */
+    unsigned char type_attr;               /**< Тип и атрибуты шлюза */
+    unsigned short int offset_middlebits;  /**< Средние 16 бит адреса обработчика */
+    unsigned int offset_highbits;          /**< Старшие 32 бита адреса обработчика */
+    unsigned int zero;                     /**< Зарезервировано (0) */
+} __attribute__((packed));
+#else
 struct IDT_entry {
     unsigned short int offset_lowerbits;  /**< Младшие 16 бит адреса обработчика */
     unsigned short int selector;         /**< Селектор сегмента кода в GDT */
@@ -32,6 +46,7 @@ struct IDT_entry {
     unsigned char type_attr;            /**< Тип и атрибуты шлюза */
     unsigned short int offset_higherbits; /**< Старшие 16 бит адреса обработчика */
 };
+#endif
 
 /* Глобальная таблица IDT */
 extern struct IDT_entry IDT[IDT_SIZE];
@@ -43,9 +58,9 @@ void idt_init(void);
 
 /**
  * @brief Загружает IDT (ассемблерная функция)
- * @param idt_ptr Указатель на структуру для команды LIDT
+ * @param idt_ptr Указатель на описатель для команды LIDT
  */
-extern void load_idt(unsigned long *idt_ptr);
+extern void load_idt(void *idt_ptr);
 
 /**
  * @brief Обработчик прерываний клавиатуры (ассемблерная функция)
@@ -59,6 +74,16 @@ extern void keyboard_handler(void);
  */
 static inline void write_port(unsigned short port, unsigned char data) {
     __asm__ volatile("outb %0, %1" : : "a"(data), "Nd"(port));
+}
+
+/**
+ * @brief Короткая задержка для старых устройств (PIC, PIT)
+ *
+ * Запись в неиспользуемый порт 0x80 занимает несколько циклов и даёт
+ * медленным контроллерам время обработать предыдущую команду.
+ */
+static inline void io_wait(void) {
+    __asm__ volatile("outb %%al, $0x80" : : "a"(0));
 }
 
 /**

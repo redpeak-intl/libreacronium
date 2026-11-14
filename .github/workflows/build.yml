@@ -21,28 +21,38 @@ jobs:
         with:
           path: |
             build/
-            kernel
+            kernel-i686
+            kernel-x86_64
           key: ${{ runner.os }}-build-${{ hashFiles('**/*.c', '**/*.asm', '**/*.h', 'Makefile') }}
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y nasm gcc-multilib qemu-system-x86 make
-      - name: Build kernel
+
+      - name: Build kernels (i686 + x86_64)
         run: make all
 
-      - name: Run kernel in QEMU (basic test)
+      - name: Run i686 kernel in QEMU (basic test)
         run: |
-          make run &
+          make ARCH=i686 run &
           sleep 5
           killall qemu-system-i386 || true
-      - name: Upload kernel artifact
+
+      - name: Run x86_64 kernel in QEMU (basic test)
+        run: |
+          make ARCH=x86_64 run &
+          sleep 5
+          killall qemu-system-x86_64 || true
+
+      - name: Upload kernel artifacts
         if: ${{ success() }}
         uses: actions/upload-artifact@v4
         with:
           name: kernel-build
           path: |
-            kernel
+            kernel-i686
+            kernel-x86_64
             build/
           retention-days: 1
 

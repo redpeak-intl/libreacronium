@@ -51,12 +51,38 @@ extern void pit_handler_asm();
 /* Глобальная таблица IDT */
 struct IDT_entry IDT[IDT_SIZE];
 
+/**
+ * @brief Описатель IDT для команды LIDT.
+ *
+ * В 32-битном режиме база 32-битная, в long mode — 64-битная. Структура
+ * всегда упакована (без выравнивания) — так требует формат LIDT.
+ */
+struct idt_ptr {
+    uint16_t limit;
+#ifdef __x86_64__
+    uint64_t base;
+#else
+    uint32_t base;
+#endif
+} __attribute__((packed));
+
 void idt_set_gate(int n, unsigned long handler) {
+#ifdef __x86_64__
+    uint64_t h = (uint64_t)handler;
+    IDT[n].offset_lowerbits  = h & 0xffff;
+    IDT[n].selector          = KERNEL_CODE_SEGMENT_OFFSET;
+    IDT[n].ist               = 0;
+    IDT[n].type_attr         = INTERRUPT_GATE;
+    IDT[n].offset_middlebits = (h >> 16) & 0xffff;
+    IDT[n].offset_highbits   = (uint32_t)((h >> 32) & 0xffffffff);
+    IDT[n].zero              = 0;
+#else
     IDT[n].offset_lowerbits = handler & 0xffff;
     IDT[n].selector = KERNEL_CODE_SEGMENT_OFFSET;
     IDT[n].zero = 0;
     IDT[n].type_attr = INTERRUPT_GATE;
     IDT[n].offset_higherbits = (handler >> 16) & 0xffff;
+#endif
 }
 
 /**
@@ -115,33 +141,38 @@ void idt_init(void)
     
     /* ICW1 - начало инициализации */
     write_port(0x20, 0x11);  // Основной PIC
+    io_wait();
     write_port(0xA0, 0x11);  // Вторичный PIC
+    io_wait();
 
     /* ICW2 - переназначение базовых векторов */
     write_port(0x21, 0x20);  // Основные прерывания начиная с 0x20
+    io_wait();
     write_port(0xA1, 0x28);  // Вторичные прерывания начиная с 0x28
+    io_wait();
 
     /* ICW3 - настройка каскадирования */
-    write_port(0x21, 0x00);  // Нет ведомого PIC на линии IRQ2
-    write_port(0xA1, 0x00);  // Не используется
+    write_port(0x21, 0x04);  // Ведомый PIC подключён к линии IRQ2 мастера
+    io_wait();
+    write_port(0xA1, 0x02);  // Ведомый PIC подключён к линии IRQ2
+    io_wait();
 
     /* ICW4 - дополнительная информация */
     write_port(0x21, 0x01);  // Режим 8086/88
+    io_wait();
     write_port(0xA1, 0x01);  // Режим 8086/88
+    io_wait();
 
     /* Маскирование всех прерываний */
     write_port(0x21, 0xff);  // Основной PIC
     write_port(0xA1, 0xff);  // Вторичный PIC
 
     /* 3. Загрузка IDT */
-    unsigned long idt_address;
-    unsigned long idt_ptr[2];
-    idt_address = (unsigned long)IDT;
-    idt_ptr[0] = (sizeof(struct IDT_entry) * IDT_SIZE) - 1;
-    idt_ptr[0] |= (idt_address & 0xFFFF) << 16;
-    idt_ptr[1] = idt_address >> 16;
-    
-    load_idt(idt_ptr);  // Ассемблерная функция загрузки IDT
+    struct idt_ptr idtp;
+    idtp.limit = (uint16_t)((sizeof(struct IDT_entry) * IDT_SIZE) - 1);
+    idtp.base = (unsigned long)(uintptr_t)IDT;
+
+    load_idt(&idtp);  // Ассемблерная функция загрузки IDT
 
     print_string_color("OK\n", COLOR_GREEN, COLOR_BLACK);  // Добавлено: успешный статус
 }
