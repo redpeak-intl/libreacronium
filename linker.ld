@@ -17,9 +17,32 @@ SECTIONS
     /* Символ начала ядра */
     _kernel_start = .;
     
-    .text : { *(.text) }
-    .data : { *(.data) }
-    .bss  : { *(.bss)  }
+    .text : { *(.text) *(.text.*) }
+    .rodata : { *(.rodata) *(.rodata.*) }
+
+    .data : { *(.data) *(.data.*) }
+
+    /*
+     * Таблица экспортируемых символов ядра (EXPORT_SYMBOL).
+     * Собирается в один непрерывный массив между двумя символами,
+     * по которому загрузчик модулей разрешает внешние ссылки.
+     */
+    .ksymtab : {
+        . = ALIGN(4);
+        __ksymtab_start = .;
+        KEEP(*(.ksymtab))
+        __ksymtab_end = .;
+    }
+
+    /*
+     * Образы встроенных .ko (сырые байты, добавленные objcopy).
+     */
+    .kmod : {
+        . = ALIGN(16);
+        *(.kmod)
+    }
+
+    .bss  : { *(.bss) *(.bss.*) *(COMMON) }
     
     /* Символ конца ядра */
     _kernel_end = .;
