@@ -52,7 +52,7 @@ void memory_copy(void* dest, const void* src, size_t count) {
     const uint8_t* s = (const uint8_t*)src;
     
     /* Проверяем перекрытие областей */
-    if (d < s || d >= s + count) {
+    if (d <= s || d >= s + count) {
         /* Копируем вперед */
         for (size_t i = 0; i < count; i++) {
             d[i] = s[i];

@@ -19,14 +19,27 @@
 /* Порт статуса клавиатуры */
 #define KEYBOARD_STATUS_PORT 0x64
 
-/* Буфер для хранения нажатых клавиш */
+/* Кольцевой буфер для хранения нажатых клавиш */
 static char keyboard_buffer[256];
-/* Текущая позиция в буфере */
-static unsigned int buffer_position = 0;
+static volatile unsigned int buffer_head = 0; /* Позиция записи */
+static volatile unsigned int buffer_tail = 0; /* Позиция чтения */
 /* Флаг нажатия Shift */
 static int shift_pressed = 0;
 /* Флаг состояния Caps Lock */
 static int caps_lock = 0;
+
+/**
+ * @brief Добавить символ в кольцевой буфер клавиатуры.
+ * @param c ASCII-символ
+ * @note Если буфер полон, символ теряется.
+ */
+static void keyboard_push(char c) {
+    unsigned int next = (buffer_head + 1) & (sizeof(keyboard_buffer) - 1);
+    if (next != buffer_tail) {
+        keyboard_buffer[buffer_head] = c;
+        buffer_head = next;
+    }
+}
 
 /**
  * Основная карта символов (без модификаторов)
@@ -63,12 +76,19 @@ static const char keyboard_map_shift[128] = {
  * @param leds Битовая маска светодиодов (LED_CAPS_LOCK, LED_NUM_LOCK, LED_SCROLL_LOCK)
  */
 static void keyboard_set_leds(uint8_t leds) {
-    // Ждем, пока клавиатура будет готова принять команду
-    while (read_port(KEYBOARD_STATUS_PORT) & 0x02);
+    uint32_t timeout;
+
+    // Ждем, пока клавиатура будет готова принять команду (с ограничением,
+    // чтобы не зависнуть внутри обработчика прерывания)
+    timeout = 100000;
+    while ((read_port(KEYBOARD_STATUS_PORT) & 0x02) && --timeout);
+    if (timeout == 0) return;
     write_port(KEYBOARD_DATA_PORT, KEYBOARD_CMD_SET_LEDS);
     
     // Ждем подтверждения
-    while (read_port(KEYBOARD_STATUS_PORT) & 0x02);
+    timeout = 100000;
+    while ((read_port(KEYBOARD_STATUS_PORT) & 0x02) && --timeout);
+    if (timeout == 0) return;
     write_port(KEYBOARD_DATA_PORT, leds);
 }
 
@@ -118,26 +138,30 @@ void keyboard_handler_main(void) {
         }
         // Обработка пробела
         else if (keycode == KEY_SPACE && !(keycode & KEY_RELEASED)) {
-            if (buffer_position < sizeof(keyboard_buffer) - 1) {
-                keyboard_buffer[buffer_position++] = ' ';
-            }
+            keyboard_push(' ');
         }
         // Обработка обычных клавиш
         else if (!(keycode & KEY_RELEASED) && keycode < 128) {
             if (keycode == KEY_TAB) {
                 // Вставляем 4 пробела
                 for (int i = 0; i < 4; i++) {
-                    if (buffer_position < sizeof(keyboard_buffer) - 1) {
-                        keyboard_buffer[buffer_position++] = ' ';
-                    }
+                    keyboard_push(' ');
                 }
             } else {
-                char c = shift_pressed || caps_lock ? 
-                       keyboard_map_shift[keycode] : 
-                       keyboard_map[keycode];
-                
-                if (c != 0 && buffer_position < sizeof(keyboard_buffer) - 1) {
-                    keyboard_buffer[buffer_position++] = c;
+                char base = keyboard_map[keycode];
+                char c;
+
+                if (base >= 'a' && base <= 'z') {
+                    /* Caps Lock и Shift для букв работают как XOR:
+                       Caps -> заглавные, Shift+Caps -> строчные */
+                    c = (shift_pressed ^ caps_lock) ? (char)(base - 32) : base;
+                } else {
+                    /* Для остальных клавиш Caps Lock не действует */
+                    c = shift_pressed ? keyboard_map_shift[keycode] : base;
+                }
+
+                if (c != 0) {
+                    keyboard_push(c);
                 }
             }
         }
@@ -151,17 +175,14 @@ void keyboard_handler_main(void) {
  * @return Символ или 0, если буфер пуст
  */
 char keyboard_read(void) {
-    if (buffer_position > 0) {
-        /* Извлечение символа из начала буфера */
-        char key = keyboard_buffer[0];
-        /* Сдвиг буфера */
-        for (unsigned int i = 1; i < buffer_position; i++) {
-            keyboard_buffer[i-1] = keyboard_buffer[i];
-        }
-        buffer_position--;
-        return key;
+    if (buffer_head == buffer_tail) {
+        return 0; /* Буфер пуст */
     }
-    return 0;
+
+    char key = keyboard_buffer[buffer_tail];
+    buffer_tail = (buffer_tail + 1) & (sizeof(keyboard_buffer) - 1);
+
+    return key;
 }
 
 /**

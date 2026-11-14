@@ -12,33 +12,122 @@
 /* Глобальный экземпляр менеджера физической памяти */
 pmm_t physical_memory_manager;
 
+/* -------------------------------------------------------------------------
+ * Структуры Multiboot (передаются загрузчиком)
+ * ---------------------------------------------------------------------- */
+
+#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+#define MULTIBOOT_INFO_MEMORY      0x00000001u /* mem_lower/mem_upper доступны */
+#define MULTIBOOT_INFO_MEM_MAP     0x00000040u /* карта памяти (mmap) доступна */
+#define MULTIBOOT_MEMORY_AVAILABLE 1
+
+struct multiboot_info {
+    uint32_t flags;
+    uint32_t mem_lower;   /* Объём памяти ниже 1MB (KB) */
+    uint32_t mem_upper;   /* Объём памяти выше 1MB (KB) */
+    uint32_t boot_device;
+    uint32_t cmdline;
+    uint32_t mods_count;
+    uint32_t mods_addr;
+    uint32_t syms[4];
+    uint32_t mmap_length;
+    uint32_t mmap_addr;
+} __attribute__((packed));
+
+struct multiboot_mmap_entry {
+    uint32_t size;        /* Размер записи без самого поля size */
+    uint64_t addr;        /* Начало области */
+    uint64_t len;         /* Длина области */
+    uint32_t type;        /* Тип (1 = доступная память) */
+} __attribute__((packed));
+
+/* Максимальный физический адрес, который отслеживает битовая карта (4GB) */
+#define MAX_PHYS_ADDR ((uint64_t)MAX_PAGES * PAGE_SIZE)
+
+/**
+ * @brief Пометить непрерывный диапазон [start, end) как свободный.
+ * @return Количество помеченных страниц.
+ * @note Диапазон обрезается по границе 4GB и выравнивается по страницам.
+ */
+static uint32_t pmm_mark_available(uint64_t start, uint64_t end) {
+    uint32_t marked = 0;
+
+    if (end > MAX_PHYS_ADDR) {
+        end = MAX_PHYS_ADDR;
+    }
+
+    /* Выравниваем границы по страницам */
+    start = (start + PAGE_SIZE - 1) & ~((uint64_t)PAGE_SIZE - 1);
+    end = end & ~((uint64_t)PAGE_SIZE - 1);
+
+    for (uint64_t addr = start; addr < end; addr += PAGE_SIZE) {
+        pmm_mark_page_free((uint32_t)addr);
+        marked++;
+    }
+    return marked;
+}
+
 /**
  * @brief Инициализация менеджера физической памяти
  * @param kernel_end Адрес конца ядра в памяти
+ * @param magic Магическое число Multiboot (в eax при загрузке)
+ * @param mbi_addr Адрес структуры Multiboot Info (в ebx при загрузке)
  */
-void pmm_init(uint32_t kernel_end) {
+void pmm_init(uint32_t kernel_end, uint32_t magic, uint32_t mbi_addr) {
     print_string("PMM Initialization... ");
-    
-    /* Инициализация структуры */
+
     physical_memory_manager.kernel_end = kernel_end;
-    physical_memory_manager.total_pages = MAX_PAGES;
-    physical_memory_manager.free_pages = MAX_PAGES;
-    
-    /* Очистка битовой карты */
-    memory_set(physical_memory_manager.bitmap, 0, sizeof(physical_memory_manager.bitmap));
-    
-    /* Помечаем страницы ядра как занятые */
+
+    /* По умолчанию считаем всю память занятой: так мы гарантированно не
+       отдадим страницы, которых физически нет. Ниже освободим доступные. */
+    memory_set(physical_memory_manager.bitmap, 0xFF,
+               sizeof(physical_memory_manager.bitmap));
+    physical_memory_manager.free_pages = 0;
+    physical_memory_manager.total_pages = 0;
+
+    uint32_t usable_pages = 0;
+
+    if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
+        struct multiboot_info *mbi = (struct multiboot_info *)mbi_addr;
+
+        if (mbi->flags & MULTIBOOT_INFO_MEM_MAP) {
+            /* Предпочтительный путь — карта памяти от загрузчика. */
+            uint32_t offset = 0;
+            while (offset < mbi->mmap_length) {
+                struct multiboot_mmap_entry *entry =
+                    (struct multiboot_mmap_entry *)(mbi->mmap_addr + offset);
+
+                if (entry->type == MULTIBOOT_MEMORY_AVAILABLE) {
+                    usable_pages += pmm_mark_available(entry->addr,
+                                                       entry->addr + entry->len);
+                }
+                offset += entry->size + sizeof(entry->size);
+            }
+        } else if (mbi->flags & MULTIBOOT_INFO_MEMORY) {
+            /* Запасной вариант: mem_upper — память выше 1MB (в KB). */
+            uint64_t upper = (uint64_t)mbi->mem_upper * 1024;
+            usable_pages += pmm_mark_available(0x100000, 0x100000 + upper);
+        }
+    }
+
+    if (usable_pages == 0) {
+        /* Карта памяти недоступна — не выделяем ничего за пределами ядра. */
+        print_string_color("WARN: no memory map", COLOR_RED, COLOR_BLACK);
+    }
+
+    physical_memory_manager.total_pages = usable_pages;
+
+    /* Резервируем первый мегабайт (BIOS, видеопамять, ROM). */
+    for (uint32_t addr = 0; addr < 0x100000; addr += PAGE_SIZE) {
+        pmm_mark_page_used(addr);
+    }
+
+    /* Резервируем область, занятую ядром. */
     uint32_t kernel_pages = (kernel_end + PAGE_SIZE - 1) >> PAGE_SHIFT;
     for (uint32_t i = 0; i < kernel_pages; i++) {
         pmm_mark_page_used(i << PAGE_SHIFT);
     }
-    
-    /* Помечаем первые 1MB как занятые (для BIOS, видеопамяти и т.д.) */
-    uint32_t reserved_pages = 1024 * 1024 / PAGE_SIZE; /* 1MB / 4KB = 256 страниц */
-    for (uint32_t i = 0; i < reserved_pages; i++) {
-        pmm_mark_page_used(i << PAGE_SHIFT);
-    }
-    
+
     print_string_color("OK\n", COLOR_GREEN, COLOR_BLACK);
     print_string("  - Total pages: ");
     print_hex(physical_memory_manager.total_pages);
@@ -171,7 +260,7 @@ void pmm_dump_info(void) {
     print_hex(physical_memory_manager.free_pages);
     print_string("\n  - Used pages: ");
     print_hex(physical_memory_manager.total_pages - physical_memory_manager.free_pages);
-    print_string("\n  - Kernel end: 0x");
+    print_string("\n  - Kernel end: ");
     print_hex(physical_memory_manager.kernel_end);
     print_string("\n");
 } 

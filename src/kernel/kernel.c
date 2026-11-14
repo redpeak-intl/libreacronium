@@ -10,6 +10,11 @@
  #include "memory/memory.h"
  #include "console.h"
  #include "shell.h"
+ #include "module/module.h"
+ #include "block/block.h"
+ #include "block/ata.h"
+ #include "fs/vfs.h"
+ #include "fs/fat32.h"
  #include <stdarg.h>
  #include <stdbool.h>
  
@@ -22,14 +27,14 @@
  /**
   * @brief Точка входа в ядро операционной системы
   */
- void kmain(void) 
+ void kmain(uint32_t magic, uint32_t mbi_addr) 
  {
      idt_init();         // Настройка таблицы прерываний
      keyboard_init();    // Инициализация драйвера клавиатуры
      pit_init();         // Инициализация системного таймера
      
      /* Инициализация менеджера памяти */
-     pmm_init((uint32_t)&_kernel_end);
+     pmm_init((uint32_t)&_kernel_end, magic, mbi_addr);
      
      /* Инициализация кучи ядра (начинаем после ядра) */
      uint32_t heap_start = align_up((uint32_t)&_kernel_end + 1024 * 1024, PAGE_SIZE); /* 1MB после ядра */
@@ -46,6 +51,21 @@
      print_string_color(kernel_name, COLOR_GREEN, COLOR_RED);
      // Информация о копирайте
      print_string(kernel_msg);
+
+     /* Инициализация подсистемы загружаемых модулей */
+     module_subsystem_init();
+
+     /* Блочный слой и файловые системы */
+     block_init();
+     struct block_device *hda = ata_init();
+     vfs_init();
+     if (hda) {
+         struct vfs_fs *rootfs = fat32_mount(hda);
+         if (rootfs) {
+             vfs_mount("/", rootfs);
+         }
+     }
+
  
      /* Запуск тестов менеджера памяти */
      //run_memory_tests();

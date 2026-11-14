@@ -63,7 +63,7 @@ extern pmm_t physical_memory_manager;
 extern heap_t kernel_heap;
 
 /* Функции Physical Memory Manager */
-void pmm_init(uint32_t kernel_end);
+void pmm_init(uint32_t kernel_end, uint32_t magic, uint32_t mbi_addr);
 uint32_t pmm_alloc_page(void);
 void pmm_free_page(uint32_t page_addr);
 uint32_t pmm_get_free_pages_count(void);

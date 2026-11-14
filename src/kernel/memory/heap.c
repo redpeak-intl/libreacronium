@@ -43,7 +43,7 @@ void heap_init(uint32_t start_addr, uint32_t size) {
     kernel_heap.first_block = first_block;
     
     print_string_color("OK\n", COLOR_GREEN, COLOR_BLACK);
-    print_string("  - Start: 0x");
+    print_string("  - Start: ");
     print_hex(start_addr);
     print_string("\n  - Size: ");
     print_hex(size);
@@ -208,14 +208,12 @@ void* krealloc(void* ptr, size_t new_size) {
         return ptr;
     }
     
-    /* Пытаемся расширить блок */
+    /* Пытаемся расширить блок на месте, поглощая следующий свободный блок */
     if (block->next && !block->next->used) {
         size_t total_size = block->size + sizeof(heap_block_t) + block->next->size;
         if (total_size >= new_size) {
-            /* Можем расширить блок */
-            block->size = new_size;
-            kernel_heap.used_size += (new_size - block->size);
-            
+            uint32_t old_size = block->size;
+
             /* Обновляем следующий блок */
             if (total_size - new_size >= MIN_BLOCK_SIZE) {
                 heap_block_t *new_next = (heap_block_t*)((uint8_t*)block + sizeof(heap_block_t) + new_size);
@@ -223,19 +221,22 @@ void* krealloc(void* ptr, size_t new_size) {
                 new_next->used = 0;
                 new_next->next = block->next->next;
                 new_next->prev = block;
-                
+
                 if (block->next->next) {
                     block->next->next->prev = new_next;
                 }
                 block->next = new_next;
+                block->size = new_size;
             } else {
-                /* Следующий блок слишком мал, объединяем */
+                /* Остаток слишком мал — забираем весь следующий блок целиком */
                 block->size = total_size;
                 block->next = block->next->next;
                 if (block->next) {
                     block->next->prev = block;
                 }
             }
+
+            kernel_heap.used_size += (block->size - old_size);
             return ptr;
         }
     }
@@ -255,9 +256,9 @@ void* krealloc(void* ptr, size_t new_size) {
  */
 void heap_dump_info(void) {
     print_string("Kernel Heap Info:\n");
-    print_string("  - Start: 0x");
+    print_string("  - Start: ");
     print_hex(kernel_heap.start_addr);
-    print_string("\n  - End: 0x");
+    print_string("\n  - End: ");
     print_hex(kernel_heap.end_addr);
     print_string("\n  - Total size: ");
     print_hex(kernel_heap.total_size);

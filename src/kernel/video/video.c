@@ -258,9 +258,10 @@ void print_dec(int n) {
 
     if (n < 0) {
         is_negative = 1;
-        num = -n;
+        /* Приводим через unsigned, чтобы корректно обработать INT_MIN */
+        num = (unsigned int)(-(unsigned int)n);
     } else {
-        num = n;
+        num = (unsigned int)n;
     }
 
     while (num != 0) {

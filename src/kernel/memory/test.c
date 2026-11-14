@@ -24,11 +24,11 @@ void test_pmm(void) {
     uint32_t page3 = pmm_alloc_page();
     
     if (page1 && page2 && page3) {
-        print_string("  - Page 1: 0x");
+        print_string("  - Page 1: ");
         print_hex(page1);
-        print_string("\n  - Page 2: 0x");
+        print_string("\n  - Page 2: ");
         print_hex(page2);
-        print_string("\n  - Page 3: 0x");
+        print_string("\n  - Page 3: ");
         print_hex(page3);
         print_string("\n");
         
@@ -72,11 +72,11 @@ void test_heap(void) {
     char* str3 = (char*)kmalloc(256);
     
     if (str1 && str2 && str3) {
-        print_string("  - Allocated 64 bytes at 0x");
+        print_string("  - Allocated 64 bytes at ");
         print_hex((uint32_t)str1);
-        print_string("\n  - Allocated 128 bytes at 0x");
+        print_string("\n  - Allocated 128 bytes at ");
         print_hex((uint32_t)str2);
-        print_string("\n  - Allocated 256 bytes at 0x");
+        print_string("\n  - Allocated 256 bytes at ");
         print_hex((uint32_t)str3);
         print_string("\n");
         
@@ -97,7 +97,7 @@ void test_heap(void) {
         print_string("Testing krealloc...\n");
         char* new_str2 = (char*)krealloc(str2, 200);
         if (new_str2) {
-            print_string("  - Reallocated to 200 bytes at 0x");
+            print_string("  - Reallocated to 200 bytes at ");
             print_hex((uint32_t)new_str2);
             print_string("\n  - Content: ");
             print_string(new_str2);
