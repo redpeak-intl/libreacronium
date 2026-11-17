@@ -35,7 +35,7 @@ ifeq ($(ARCH),x86_64)
   BOOT_ASM    := src/boot/boot64.asm
   IDT_ASM     := src/kernel/idt/idt_load64.asm \
                  src/kernel/idt/exception_handlers64.asm \
-                 src/kernel/idt/pit_handler64.asm
+                 src/kernel/sched/sched_switch64.asm
   KERNEL      := kernel-x86_64
 else
   NASMFLAGS   := -f elf32 -g
@@ -51,7 +51,7 @@ else
   BOOT_ASM    := src/boot/boot.asm
   IDT_ASM     := src/kernel/idt/idt_load.asm \
                  src/kernel/idt/exception_handlers.asm \
-                 src/kernel/idt/pit_handler.asm
+                 src/kernel/sched/sched_switch.asm
   KERNEL      := kernel-i686
 endif
 
@@ -62,11 +62,19 @@ LD      := ld
 OBJCOPY := objcopy
 GDB     := gdb
 
+# Общие пути включения для исходников ядра (относительно корня проекта).
+KINCLUDES := -Isrc/kernel -Isrc/kernel/net \
+             -Isrc/kernel/net/lwip/include -Isrc/kernel/net/lwip/port
+CFLAGS += $(KINCLUDES)
+
 LDFLAGS := -m $(LDFORMAT) -T $(LINKER)
 
+# Устройства QEMU: e1000 в пользовательской сети (DHCP-сервер slirp).
+QEMU_NET := -netdev user,id=net0 -device e1000,netdev=net0
+
 # Полные флаги для QEMU (включая режим вывода и ядро)
-QEMUFLAGS_RUN := -display curses -kernel $(KERNEL)
-QEMUFLAGS_DEBUG := -display curses -kernel $(KERNEL) -s -S
+QEMUFLAGS_RUN := -display curses -kernel $(KERNEL) $(QEMU_NET)
+QEMUFLAGS_DEBUG := -display curses -kernel $(KERNEL) $(QEMU_NET) -s -S
 
 # Поиск исходников (arch-зависимые asm выбираются по ARCH)
 ASM_SOURCES := $(BOOT_ASM) $(IDT_ASM)
@@ -77,7 +85,14 @@ C_SOURCES = $(wildcard src/kernel/*.c) \
             $(wildcard src/kernel/memory/*.c) \
             $(wildcard src/kernel/module/*.c) \
             $(wildcard src/kernel/block/*.c) \
-            $(wildcard src/kernel/fs/*.c)
+            $(wildcard src/kernel/fs/*.c) \
+            $(wildcard src/kernel/sched/*.c) \
+            $(wildcard src/kernel/net/*.c) \
+            $(wildcard src/kernel/net/lwip/core/*.c) \
+            $(wildcard src/kernel/net/lwip/core/ipv4/*.c) \
+            $(wildcard src/kernel/net/lwip/api/*.c) \
+            src/kernel/net/lwip/netif/ethernet.c \
+            $(wildcard src/kernel/net/lwip/port/*.c)
 
 MODULE_KO := $(patsubst %, $(OBJDIR)/modules/%.ko, $(MODULES))
 MODULE_BLOBS := $(patsubst %, $(OBJDIR)/modules/%_blob.o, $(MODULES))

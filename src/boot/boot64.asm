@@ -32,14 +32,8 @@ start:
         mov edi, eax
         mov esi, ebx
 
-        ; --- Связываем таблицы страниц: PML4 -> PDPT -> PD ---
-        mov eax, pdpt
-        or  eax, 0x03              ; present | writable
-        mov [pml4], eax
-
-        mov eax, pd
-        or  eax, 0x03
-        mov [pdpt], eax
+        ; --- Связывание таблиц страниц задано статически (см. .data) ---
+        ; PML4[0] -> PDPT, PDPT[0..3] -> PD/PD1/PD2/PD3 (идентично 4 GiB).
 
         ; --- CR3 = физический адрес PML4 ---
         mov eax, pml4
@@ -102,24 +96,57 @@ gdt64_ptr:
         dq gdt64                   ; линейный (== физический) адрес GDT
 
 ; ----------------------------------------------------------------------
-;  Таблицы страниц: идентичное отображение первых 1 GiB (512 * 2 MiB)
+;  Таблицы страниц: идентичное отображение первых 4 GiB.
+;
+;  PML4[0] -> PDPT; PDPT[0..3] -> PD/PD1/PD2/PD3, каждая PD описывает 1 GiB
+;  через 512 страниц по 2 MiB. Отображение первых 4 GiB (а не только 1 GiB)
+;  нужно, чтобы MMIO-области PCI-устройств (например, e1000 у ~0xFEBE0000)
+;  были доступны напрямую сразу после включения long mode.
 ; ----------------------------------------------------------------------
 section .data
 align 4096
 pml4:
-        dq 0x0000000000000003      ; [0] -> pdpt (present|rw)
+        dq pdpt + 0x0003            ; [0] -> pdpt (present|rw)
         times 511 dq 0
 
 align 4096
 pdpt:
-        dq 0x0000000000000003      ; [0] -> pd (present|rw)
-        times 511 dq 0
+        dq pd  + 0x0003             ; [0] -> 0x00000000 - 0x3FFFFFFF
+        dq pd1 + 0x0003             ; [1] -> 0x40000000 - 0x7FFFFFFF
+        dq pd2 + 0x0003             ; [2] -> 0x80000000 - 0xBFFFFFFF
+        dq pd3 + 0x0003             ; [3] -> 0xC0000000 - 0xFFFFFFFF
+        times 508 dq 0
 
+; PD (0 GiB)
 align 4096
 pd:
 %assign i 0
 %rep 512
-        dq (i << 21) | 0x83        ; 2 MiB, present | rw | page-size
+        dq (i << 21) | 0x83
+%assign i i+1
+%endrep
+; PD1 (1 GiB)
+align 4096
+pd1:
+%assign i 0
+%rep 512
+        dq ((512 + i) << 21) | 0x83
+%assign i i+1
+%endrep
+; PD2 (2 GiB)
+align 4096
+pd2:
+%assign i 0
+%rep 512
+        dq ((1024 + i) << 21) | 0x83
+%assign i i+1
+%endrep
+; PD3 (3 GiB)
+align 4096
+pd3:
+%assign i 0
+%rep 512
+        dq ((1536 + i) << 21) | 0x83
 %assign i i+1
 %endrep
 

@@ -15,6 +15,8 @@
  #include "block/ata.h"
  #include "fs/vfs.h"
  #include "fs/fat32.h"
+ #include "sched/sched.h"
+ #include "net/net.h"
  #include <stdarg.h>
  #include <stdbool.h>
  
@@ -38,7 +40,7 @@
      
      /* Инициализация кучи ядра (начинаем после ядра) */
      uint32_t heap_start = align_up((uint32_t)&_kernel_end + 1024 * 1024, PAGE_SIZE); /* 1MB после ядра */
-     uint32_t heap_size = 1024 * 1024; /* 1MB для кучи */
+     uint32_t heap_size = 4 * 1024 * 1024; /* 4MB для кучи (сеть lwip + стеки задач) */
      heap_init(heap_start, heap_size);
 
      clear_screen();
@@ -72,6 +74,17 @@
  
      /* Запуск тестов системного таймера */
      //run_timer_tests();
+
+     /* Подсистема задач (потоков ядра). Инициализируется до сети, т.к. lwip
+        в режиме NO_SYS=0 создаёт поток tcpip_thread через планировщик. */
+     sched_init();
+
+     /* Сеть: драйвер e1000, стек lwip, DHCP и задача опроса приёмного кольца. */
+     net_init();
+
+     /* Включаем вытесняющую многозадачность (стартуют tcpip_thread и netrx). */
+     sched_start();
+
  
      /**
       * @brief Основной цикл ядра с временным псевдо-терминалом

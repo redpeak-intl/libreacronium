@@ -10,6 +10,8 @@
 #include "drivers/pit.h"
 #include "module/module.h"
 #include "fs/vfs.h"
+#include "sched/sched.h"
+#include "net/net.h"
 
 /* kernel_panic определён в kernel.c */
 void kernel_panic(const char* msg);
@@ -74,6 +76,19 @@ static const char* split_token(const char *arg, char *tok, int tokmax) {
     return str_skip_spaces(p + i);
 }
 
+/* Разобрать беззнаковое десятичное число (для "ping IP COUNT"). */
+static uint32_t parse_u32(const char *s, uint32_t dflt) {
+    uint32_t v = 0;
+    int any = 0;
+    if (!s) return dflt;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + (uint32_t)(*s - '0');
+        s++;
+        any = 1;
+    }
+    return any ? v : dflt;
+}
+
 static void shell_print_help(void) {
     console_println("");
     console_println("libreacronium shell commands:");
@@ -94,6 +109,11 @@ static void shell_print_help(void) {
     console_println("  rm PATH   - remove file/directory");
     console_println("  write F T - create/overwrite file F with text T");
     console_println("  mount     - list mounted filesystems");
+    console_println("  ifconfig  - show network interface");
+    console_println("  netstat   - show network stats and tasks");
+    console_println("  ping IP   - send ICMP echo: ping IP [count]");
+    console_println("  dhcp      - restart DHCP client");
+    console_println("  sched     - list kernel tasks");
     console_println("  panic     - trigger kernel panic");
 }
 
@@ -203,6 +223,26 @@ void shell_execute(const char *cmd) {
         }
     } else if (str_eq(cmd, "mount")) {
         vfs_list_mounts();
+    } else if (str_eq(cmd, "ifconfig")) {
+        net_ifconfig();
+    } else if (str_eq(cmd, "netstat")) {
+        net_stat();
+    } else if (str_eq(cmd, "sched")) {
+        sched_dump();
+    } else if (str_eq(cmd, "dhcp")) {
+        if (net_dhcp_renew() == 0) {
+            console_println("dhcp: клиент перезапущен");
+        } else {
+            console_println("dhcp: сеть недоступна");
+        }
+    } else if (parse_cmd(cmd, "ping", &arg)) {
+        char host[64];
+        const char *rest = split_token(arg, host, sizeof(host));
+        if (!host[0]) {
+            console_println("ping: usage: ping IP [count]");
+        } else {
+            net_ping(host, parse_u32(rest, 4));
+        }
     } else if (str_eq(cmd, "panic")) {
         kernel_panic("Manual panic triggered from shell.\n");
     } else {

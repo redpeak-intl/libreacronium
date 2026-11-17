@@ -45,8 +45,11 @@ extern void isr29();
 extern void isr30();
 extern void isr31();
 
-/* Объявление обработчика прерывания PIT */
+/* Объявление обработчика прерывания PIT (заглушка таймера/планировщика) */
 extern void pit_handler_asm();
+
+/* Объявление заглушки добровольной отдачи процессора (вектор 0x30) */
+extern void sched_yield_asm();
 
 /* Глобальная таблица IDT */
 struct IDT_entry IDT[IDT_SIZE];
@@ -136,6 +139,9 @@ void idt_init(void)
 
     /* Настройка обработчика системного таймера (IRQ0 -> INT 0x20) */
     idt_set_gate(0x20, (unsigned long)pit_handler_asm);
+
+    /* Вектор 0x30 — программный "yield" планировщика (INT 0x30) */
+    idt_set_gate(0x30, (unsigned long)sched_yield_asm);
 
     /* 2. Перенастройка PIC (Programmable Interrupt Controller) */
     
